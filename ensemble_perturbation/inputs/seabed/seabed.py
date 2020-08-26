@@ -2,7 +2,10 @@ from abc import ABC, abstractmethod
 import os
 
 from geopandas import GeoDataFrame
-from pyproj import CRS
+import numpy
+from pyproj import CRS, Transformer
+from scipy.spatial.ckdtree import cKDTree
+from shapely.geometry import MultiPoint
 
 from ensemble_perturbation import get_logger
 
@@ -63,3 +66,29 @@ class SeabedDescriptions(ABC):
         kwargs['driver'] = drivers[extension]
 
         self.data.to_file(filename, **kwargs)
+
+    def interpolate(self, points: [(float, float)], crs: CRS = None) -> ():
+        if not isinstance(points, numpy.ndarray):
+            points = numpy.array(points)
+        if len(points.shape) < 2:
+            points = numpy.expand_dims(points, axis=0)
+        if crs is not None and crs != self.crs:
+            transformer = Transformer.from_crs(crs, self.crs)
+            points = numpy.stack(transformer.transform(points[:, 0],
+                                                       points[:, 1]), axis=1)
+
+        data_points = numpy.array(list(self.data['geometry'].apply(
+            lambda point: (point.x, point.y))))
+
+        tree = cKDTree(data_points)
+        distances, indices = tree.query(points, 3)
+        nearest_points = numpy.squeeze(data_points[indices])
+
+        interpolated_values = []
+        if MultiPoint(points).within(MultiPoint(nearest_points).convex_hull):
+            nearest_values = [self.data.cx[point[0],
+                                           point[1]][self.description_field]
+                              for point in nearest_points]
+
+            for point in points:
+                nearest_values
