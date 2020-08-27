@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 import os
 
+import geopandas
 from geopandas import GeoDataFrame
 import numpy
 from pyproj import CRS, Transformer
@@ -83,9 +84,30 @@ class SeabedDescriptions(ABC):
         tree = cKDTree(data_points)
         distances, indices = tree.query(points, 3)
         nearest_points = numpy.squeeze(data_points[indices])
+        nearest_points = GeoDataFrame({
+            'x': nearest_points[:, 0],
+            'y': nearest_points[:, 1],
+            'distance': distances[0]
+        }, geometry=geopandas.points_from_xy(nearest_points[:, 0],
+                                             nearest_points[:, 1]))
+
+        points_inside = MultiPoint(points).intersection(
+            MultiPoint(nearest_points['geometry']).convex_hull)
+        outside_point_indices = []
+        for point_outside in MultiPoint(points) - points_inside:
+            for point_index, point in enumerate(points):
+                if point.xy == point_outside:
+                    outside_point_indices.append(point_index)
+                    break
+        if len(outside_point_indices) > 0:
+            points = points.tolist()
+            for point_index in sorted(outside_point_indices, reverse=True):
+                del points[point_index]
+            points = numpy.array(points)
 
         interpolated_values = []
-        if MultiPoint(points).within(MultiPoint(nearest_points).convex_hull):
+        if MultiPoint(points).intersection(
+                MultiPoint(nearest_points).convex_hull):
             nearest_values = [self.data.cx[point[0],
                                            point[1]][self.description_field]
                               for point in nearest_points]
